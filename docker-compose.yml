@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kscspms-db
+    environment:
+      POSTGRES_USER: kscspms
+      POSTGRES_PASSWORD: kscspms_dev_password
+      POSTGRES_DB: kscspms
+    ports:
+      - "5432:5432"
+    volumes:
+      - kscspms_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kscspms"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: kscspms-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: kscspms_minio
+      MINIO_ROOT_PASSWORD: kscspms_minio_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - kscspms_minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # One-shot bucket bootstrap (optional)
+  minio-init:
+    image: minio/mc:latest
+    container_name: kscspms-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 kscspms_minio kscspms_minio_secret;
+      mc mb -p local/kscspms-documents || true;
+      mc anonymous set none local/kscspms-documents || true;
+      echo Bucket ready;
+      "
+    restart: "no"
+
+volumes:
+  kscspms_pgdata:
+  kscspms_minio:

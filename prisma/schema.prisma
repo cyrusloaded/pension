@@ -1,0 +1,1092 @@
+// Kogi State Civil Service Pension Management System (KSCSPMS)
+// Prisma Schema - Core models for Phase 1-3 foundation
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// IDENTITY & ACCESS CONTROL
+// ============================================================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  username        String?   @unique
+  staffNumber     String?   @unique
+  passwordHash    String
+  firstName       String
+  lastName        String
+  middleName      String?
+  phone           String?
+  isActive        Boolean   @default(true)
+  isEmailVerified Boolean   @default(false)
+  mustChangePassword Boolean @default(false)
+  lastLoginAt     DateTime?
+  failedLoginAttempts Int   @default(0)
+  lockedUntil     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdById     String?
+  organizationId  String?
+
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  roles           UserRole[]
+  sessions        Session[]
+  loginHistory    LoginHistory[]
+  passwordResets  PasswordResetToken[]
+  auditLogs       AuditLog[]       @relation("AuditActor")
+  assignedCases   RetirementCase[] @relation("AssignedOfficer")
+  notifications   Notification[]
+  pensioner       Pensioner?
+
+  @@index([email])
+  @@index([staffNumber])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  code        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  module      String
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+
+  @@index([module])
+  @@map("permissions")
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  roleId    String
+  assignedAt DateTime @default(now())
+  assignedById String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  token        String   @unique
+  expiresAt    DateTime
+  ipAddress    String?
+  userAgent    String?
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String?
+  email     String?
+  success   Boolean
+  ipAddress String?
+  userAgent String?
+  failureReason String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("login_history")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("password_reset_tokens")
+}
+
+// ============================================================================
+// ORGANIZATION
+// ============================================================================
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  type        OrganizationType
+  parentId    String?
+  lgaCode     String?
+  status      String   @default("ACTIVE")
+  address     String?
+  phone       String?
+  email       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  parent      Organization?  @relation("OrgHierarchy", fields: [parentId], references: [id])
+  children    Organization[] @relation("OrgHierarchy")
+  users       User[]
+  employees   Employee[]
+  pensioners  Pensioner[]
+
+  @@index([type])
+  @@index([parentId])
+  @@map("organizations")
+}
+
+enum OrganizationType {
+  MINISTRY
+  DEPARTMENT
+  AGENCY
+  LGA
+  ADMIN_OFFICE
+  UNIT
+  SECTION
+}
+
+// ============================================================================
+// EMPLOYEE REGISTRY
+// ============================================================================
+
+model Employee {
+  id              String   @id @default(cuid())
+  staffNumber     String   @unique
+  title           String?
+  firstName       String
+  lastName        String
+  middleName      String?
+  dateOfBirth     DateTime
+  gender          String?
+  maritalStatus   String?
+  nationality     String?  @default("Nigerian")
+  stateOfOrigin   String?
+  lgaOfOrigin     String?
+  nin             String?  @unique
+  phone           String?
+  email           String?
+  residentialAddress String?
+  permanentAddress   String?
+  
+  organizationId  String
+  employmentCategory String?
+  appointmentDate DateTime?
+  confirmationDate DateTime?
+  jobTitle        String?
+  gradeLevel      String?
+  step            Int?
+  employmentStatus EmploymentStatus @default(ACTIVE)
+  pensionSchemeId String?
+  
+  nextOfKinName   String?
+  nextOfKinPhone  String?
+  nextOfKinRelationship String?
+  
+  isArchived      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdById     String?
+
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  pensionScheme   PensionScheme? @relation(fields: [pensionSchemeId], references: [id])
+  serviceHistory  ServiceHistory[]
+  salaryHistory   SalaryHistory[]
+  documents       EmployeeDocument[]
+  retirementCases RetirementCase[]
+  pensioner       Pensioner?
+  verificationCases VerificationCase[]
+
+  @@index([staffNumber])
+  @@index([organizationId])
+  @@index([employmentStatus])
+  @@index([lastName, firstName])
+  @@map("employees")
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  RETIRED
+  TERMINATED
+  DECEASED
+  ARCHIVED
+}
+
+model ServiceHistory {
+  id            String   @id @default(cuid())
+  employeeId    String
+  organizationId String?
+  jobTitle      String?
+  gradeLevel    String?
+  step          Int?
+  startDate     DateTime
+  endDate       DateTime?
+  reason        String?
+  remarks       String?
+  isCurrent     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("service_history")
+}
+
+model SalaryHistory {
+  id            String   @id @default(cuid())
+  employeeId    String
+  gradeLevel    String
+  step          Int?
+  basicSalary   Decimal  @db.Decimal(14, 2)
+  allowances    Decimal? @db.Decimal(14, 2)
+  totalEmolument Decimal? @db.Decimal(14, 2)
+  effectiveDate DateTime
+  endDate       DateTime?
+  remarks       String?
+  createdAt     DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("salary_history")
+}
+
+model EmployeeDocument {
+  id            String   @id @default(cuid())
+  employeeId    String
+  documentType  String
+  fileName      String
+  filePath      String
+  fileSize      Int?
+  mimeType      String?
+  uploadedById  String?
+  verificationStatus String @default("PENDING")
+  remarks       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("employee_documents")
+}
+
+// ============================================================================
+// PENSION SCHEME & RULES
+// ============================================================================
+
+model PensionScheme {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employees   Employee[]
+  pensioners  Pensioner[]
+  ruleVersions PensionRuleVersion[]
+  retirementCases RetirementCase[]
+
+  @@map("pension_schemes")
+}
+
+model PensionRuleVersion {
+  id            String   @id @default(cuid())
+  schemeId      String
+  version       String
+  name          String
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  rulesJson     Json     // Configurable calculation parameters
+  status        String   @default("DRAFT") // DRAFT, PENDING_APPROVAL, APPROVED, SUPERSEDED
+  approvedAt    DateTime?
+  approvedById  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  scheme        PensionScheme @relation(fields: [schemeId], references: [id])
+  assessments   BenefitAssessment[]
+
+  @@unique([schemeId, version])
+  @@index([schemeId])
+  @@map("pension_rule_versions")
+}
+
+// ============================================================================
+// RETIREMENT & BENEFITS
+// ============================================================================
+
+model RetirementCase {
+  id                String   @id @default(cuid())
+  caseReference     String   @unique
+  employeeId        String
+  pensionSchemeId   String?
+  retirementCategory String?
+  expectedRetirementDate DateTime?
+  actualRetirementDate DateTime?
+  initiationDate    DateTime @default(now())
+  currentStage      RetirementStage @default(ELIGIBILITY_ASSESSMENT)
+  status            String   @default("OPEN") // OPEN, ON_HOLD, CLOSED, REJECTED
+  assignedOfficerId String?
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdById       String?
+
+  employee          Employee @relation(fields: [employeeId], references: [id])
+  pensionScheme     PensionScheme? @relation(fields: [pensionSchemeId], references: [id])
+  assignedOfficer   User? @relation("AssignedOfficer", fields: [assignedOfficerId], references: [id])
+  assessments       BenefitAssessment[]
+  documents         RetirementDocument[]
+  timeline          RetirementTimeline[]
+  pensioner         Pensioner?
+
+  @@index([employeeId])
+  @@index([currentStage])
+  @@index([status])
+  @@index([caseReference])
+  @@map("retirement_cases")
+}
+
+enum RetirementStage {
+  ELIGIBILITY_ASSESSMENT
+  NOTIFICATION
+  APPLICATION
+  DOCUMENT_SUBMISSION
+  SERVICE_VERIFICATION
+  CASE_REVIEW
+  MISSING_INFO
+  BENEFIT_ASSESSMENT
+  CALCULATION_REVIEW
+  APPROVAL
+  PENSIONER_ENROLMENT
+  PAYMENT_PREPARATION
+  PAYMENT_AUTHORIZATION
+  DISBURSEMENT
+  CLOSED
+}
+
+model RetirementDocument {
+  id              String   @id @default(cuid())
+  retirementCaseId String
+  documentType    String
+  fileName        String
+  filePath        String
+  status          String   @default("PENDING")
+  remarks         String?
+  uploadedAt      DateTime @default(now())
+
+  retirementCase  RetirementCase @relation(fields: [retirementCaseId], references: [id], onDelete: Cascade)
+
+  @@index([retirementCaseId])
+  @@map("retirement_documents")
+}
+
+model RetirementTimeline {
+  id              String   @id @default(cuid())
+  retirementCaseId String
+  stage           String
+  action          String
+  performedById   String?
+  comments        String?
+  createdAt       DateTime @default(now())
+
+  retirementCase  RetirementCase @relation(fields: [retirementCaseId], references: [id], onDelete: Cascade)
+
+  @@index([retirementCaseId])
+  @@map("retirement_timeline")
+}
+
+model BenefitAssessment {
+  id                String   @id @default(cuid())
+  retirementCaseId  String
+  ruleVersionId     String?
+  assessmentRef     String   @unique
+  status            String   @default("DRAFT") // DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, REJECTED, RETURNED
+  qualifyingServiceYears Decimal? @db.Decimal(6, 2)
+  finalSalary       Decimal? @db.Decimal(14, 2)
+  calculationInputs Json?
+  calculationBreakdown Json?
+  grossEntitlement  Decimal? @db.Decimal(14, 2)
+  deductions        Decimal? @db.Decimal(14, 2)
+  netEntitlement    Decimal? @db.Decimal(14, 2)
+  gratuityAmount    Decimal? @db.Decimal(14, 2)
+  monthlyPension    Decimal? @db.Decimal(14, 2)
+  warnings          String?
+  reviewerComments  String?
+  assessedById      String?
+  reviewedById      String?
+  approvedById      String?
+  assessedAt        DateTime?
+  reviewedAt        DateTime?
+  approvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  retirementCase    RetirementCase @relation(fields: [retirementCaseId], references: [id])
+  ruleVersion       PensionRuleVersion? @relation(fields: [ruleVersionId], references: [id])
+
+  @@index([retirementCaseId])
+  @@index([status])
+  @@map("benefit_assessments")
+}
+
+// ============================================================================
+// PENSIONER
+// ============================================================================
+
+model Pensioner {
+  id                String   @id @default(cuid())
+  pensionerNumber   String   @unique
+  employeeId        String?  @unique
+  userId            String?  @unique
+  organizationId    String?
+  pensionSchemeId   String?
+  retirementCaseId  String?  @unique
+  retirementDate    DateTime?
+  enrolmentDate     DateTime?
+  entitlementAmount Decimal? @db.Decimal(14, 2)
+  monthlyPension    Decimal? @db.Decimal(14, 2)
+  paymentFrequency  String   @default("MONTHLY")
+  paymentStatus     String   @default("PENDING") // PENDING, ACTIVE, SUSPENDED, STOPPED, DECEASED
+  verificationStatus String  @default("PENDING")
+  // Lifecycle (SRS §6): NEW_PLACEMENT until activated on payroll
+  placementStatus   String   @default("ACTIVE") // NEW_PLACEMENT, ACTIVE, INACTIVE, DECEASED, SUSPENDED
+  statusReason      String?
+  deactivatedAt     DateTime?
+  dateOfDeath       DateTime?
+  deathReportedAt   DateTime?
+  deathReportedById String?
+  deathReportSource String?
+  deathVerificationStatus String? // REPORTED, VERIFIED, DISPUTED, REJECTED
+  deathVerifiedById String?
+  deathVerifiedAt   DateTime?
+  bankName          String?
+  bankAccountNumber String?
+  bankAccountName   String?
+  bvn               String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  employee          Employee? @relation(fields: [employeeId], references: [id])
+  user              User? @relation(fields: [userId], references: [id])
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+  pensionScheme     PensionScheme? @relation(fields: [pensionSchemeId], references: [id])
+  retirementCase    RetirementCase? @relation(fields: [retirementCaseId], references: [id])
+  paymentItems      PaymentScheduleItem[]
+  arrears           Arrear[]
+  verificationCases VerificationCase[]
+  complaints        Complaint[]
+  placementRecords  PlacementRecord[]
+  gratuityEntitlement GratuityEntitlement?
+  nextOfKinClaims   NextOfKinClaim[]
+
+  @@index([pensionerNumber])
+  @@index([placementStatus])
+  @@index([paymentStatus])
+  @@index([verificationStatus])
+  @@map("pensioners")
+}
+
+// ============================================================================
+// VERIFICATION
+// ============================================================================
+
+model VerificationCase {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  employeeId      String?
+  pensionerId     String?
+  verificationType String
+  status          String   @default("PENDING") // PENDING, IN_PROGRESS, APPROVED, REJECTED, MORE_INFO
+  scheduledDate   DateTime?
+  completedDate   DateTime?
+  assignedOfficerId String?
+  decision        String?
+  decisionReason  String?
+  decidedById     String?
+  decidedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  employee        Employee? @relation(fields: [employeeId], references: [id])
+  pensioner       Pensioner? @relation(fields: [pensionerId], references: [id])
+  evidence        VerificationEvidence[]
+
+  @@index([status])
+  @@index([employeeId])
+  @@index([pensionerId])
+  @@map("verification_cases")
+}
+
+model VerificationEvidence {
+  id                String   @id @default(cuid())
+  verificationCaseId String
+  evidenceType      String
+  fileName          String?
+  filePath          String?
+  description       String?
+  uploadedAt        DateTime @default(now())
+
+  verificationCase  VerificationCase @relation(fields: [verificationCaseId], references: [id], onDelete: Cascade)
+
+  @@index([verificationCaseId])
+  @@map("verification_evidence")
+}
+
+// ============================================================================
+// PAYMENTS
+// ============================================================================
+
+model PaymentSchedule {
+  id              String   @id @default(cuid())
+  scheduleRef     String   @unique
+  paymentPeriod   String   // e.g. "2026-01"
+  periodStart     DateTime
+  periodEnd       DateTime
+  status          String   @default("DRAFT") // DRAFT, PENDING_REVIEW, APPROVED, SUBMITTED, PROCESSING, SUCCESSFUL, FAILED, RECONCILED
+  totalAmount     Decimal  @db.Decimal(16, 2) @default(0)
+  totalItems      Int      @default(0)
+  preparedById    String?
+  approvedById    String?
+  authorizedById  String?
+  preparedAt      DateTime?
+  approvedAt      DateTime?
+  authorizedAt    DateTime?
+  submittedAt     DateTime?
+  notes           String?
+  // SRS four-stage: PREPARATION → INTERNAL_AUDIT → DG_APPROVAL → DFA_PAYMENT → COMPLETED
+  workflowStage   String   @default("PREPARATION")
+  paymentType     String   @default("MONTHLY_PENSION") // MONTHLY_PENSION, GRATUITY, ARREARS, MIXED
+  auditedById     String?
+  auditedAt       DateTime?
+  auditRemarks    String?
+  auditDecision   String?  // RECOMMEND_APPROVE, RECOMMEND_REJECT, RETURN
+  dgApprovedById  String?
+  dgApprovedAt    DateTime?
+  dgRemarks       String?
+  dgDecision      String?  // APPROVED, REJECTED, RETURN
+  dfaReceivedById String?
+  dfaReceivedAt   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items           PaymentScheduleItem[]
+  reconciliation  PaymentReconciliation?
+  assessment      PaymentAssessment?
+  source          String   @default("MANUAL") // MANUAL, IMPORT, AUTO
+  importFileName  String?
+
+  @@index([paymentPeriod])
+  @@index([status])
+  @@map("payment_schedules")
+}
+
+model PaymentScheduleItem {
+  id                String   @id @default(cuid())
+  scheduleId        String
+  pensionerId       String
+  amount            Decimal  @db.Decimal(14, 2)
+  adjustments       Decimal? @db.Decimal(14, 2)
+  deductions        Decimal? @db.Decimal(14, 2)
+  netAmount         Decimal  @db.Decimal(14, 2)
+  bankAccountNumber String?
+  bankName          String?
+  status            String   @default("PENDING")
+  transactionRef    String?
+  failureReason     String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  schedule          PaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  pensioner         Pensioner @relation(fields: [pensionerId], references: [id])
+
+  @@unique([scheduleId, pensionerId])
+  @@index([scheduleId])
+  @@index([pensionerId])
+  @@map("payment_schedule_items")
+}
+
+
+// ============================================================================
+// ARREARS & RECONCILIATION
+// ============================================================================
+
+model Arrear {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  pensionerId     String
+  periodFrom      String   // e.g. "2025-10"
+  periodTo        String
+  monthsCount     Int      @default(1)
+  monthlyAmount   Decimal  @db.Decimal(14, 2)
+  totalAmount     Decimal  @db.Decimal(14, 2)
+  reason          String?
+  status          String   @default("OPEN") // OPEN, APPROVED, SCHEDULED, PAID, WRITTEN_OFF, CANCELLED
+  approvedById    String?
+  approvedAt      DateTime?
+  paidAt          DateTime?
+  paymentItemId   String?
+  notes           String?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pensioner       Pensioner @relation(fields: [pensionerId], references: [id])
+
+  @@index([pensionerId])
+  @@index([status])
+  @@map("arrears")
+}
+
+model PaymentReconciliation {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  scheduleId      String   @unique
+  bankReference   String?
+  bankDate        DateTime?
+  expectedAmount  Decimal  @db.Decimal(16, 2)
+  actualAmount    Decimal? @db.Decimal(16, 2)
+  variance        Decimal? @db.Decimal(16, 2)
+  matchedItems    Int      @default(0)
+  unmatchedItems  Int      @default(0)
+  status          String   @default("PENDING") // PENDING, MATCHED, VARIANCE, CLOSED
+  notes           String?
+  reconciledById  String?
+  reconciledAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  schedule        PaymentSchedule @relation(fields: [scheduleId], references: [id])
+
+  @@index([status])
+  @@map("payment_reconciliations")
+}
+
+// ============================================================================
+// COMPLAINTS
+// ============================================================================
+
+model Complaint {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  pensionerId     String?
+  submitterName   String?
+  submitterEmail  String?
+  submitterPhone  String?
+  category        String
+  subject         String
+  description     String
+  priority        String   @default("MEDIUM")
+  status          String   @default("OPEN") // OPEN, ASSIGNED, IN_PROGRESS, RESOLVED, CLOSED, REOPENED
+  assignedOfficerId String?
+  resolution      String?
+  closedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pensioner       Pensioner? @relation(fields: [pensionerId], references: [id])
+
+  @@index([status])
+  @@index([category])
+  @@index([pensionerId])
+  @@map("complaints")
+}
+
+// ============================================================================
+// NOTIFICATIONS & AUDIT
+// ============================================================================
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  message     String
+  type        String   @default("INFO")
+  link        String?
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actorId       String?
+  actorEmail    String?
+  action        String
+  entityType    String
+  entityId      String?
+  beforeValues  Json?
+  afterValues   Json?
+  ipAddress     String?
+  userAgent     String?
+  correlationId String?
+  outcome       String   @default("SUCCESS")
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  actor         User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       Json
+  description String?
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  @@map("system_settings")
+}
+
+model Announcement {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String
+  excerpt     String?
+  isPublished Boolean  @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  @@index([slug])
+  @@index([isPublished])
+  @@map("announcements")
+}
+
+
+// ============================================================================
+// PAYMENT ASSESSMENT & GATEWAY (schedule → payable assessment code)
+// ============================================================================
+
+model PaymentAssessment {
+  id              String   @id @default(cuid())
+  assessmentCode  String   @unique
+  scheduleId      String   @unique
+  paymentPeriod   String
+  description     String?
+  totalAmount     Decimal  @db.Decimal(16, 2)
+  totalItems      Int      @default(0)
+  currency        String   @default("NGN")
+  status          String   @default("PENDING") // PENDING, READY, PAYMENT_INITIATED, PAID, FAILED, CANCELLED
+  paymentMethod   String?  // BANK_TRANSFER, GATEWAY
+  gatewayProvider String?  // PAYSTACK, FLUTTERWAVE, INTERSWITCH, MANUAL_BANK
+  gatewayRef      String?
+  paidAt          DateTime?
+  paidAmount      Decimal? @db.Decimal(16, 2)
+  receiptRef      String?
+  notes           String?
+  generatedById   String?
+  generatedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  schedule        PaymentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  transactions    PaymentGatewayTransaction[]
+
+  @@index([status])
+  @@index([assessmentCode])
+  @@map("payment_assessments")
+}
+
+model PaymentGatewayTransaction {
+  id              String   @id @default(cuid())
+  assessmentId    String
+  provider        String   // PAYSTACK, FLUTTERWAVE, INTERSWITCH, MANUAL_BANK
+  externalRef     String?
+  amount          Decimal  @db.Decimal(16, 2)
+  currency        String   @default("NGN")
+  status          String   @default("INITIATED") // INITIATED, PENDING, SUCCESS, FAILED, CANCELLED
+  channel         String?  // card, bank_transfer, ussd, etc.
+  rawResponse     Json?
+  initiatedById   String?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  assessment      PaymentAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@index([assessmentId])
+  @@index([status])
+  @@index([externalRef])
+  @@map("payment_gateway_transactions")
+}
+
+
+// ============================================================================
+// SRS ALIGNMENT — Placements, Gratuity ledger, Next-of-kin, Hybrid physical files
+// ============================================================================
+
+model PlacementRecord {
+  id              String   @id @default(cuid())
+  pensionerId     String
+  category        String   @default("NEW_PLACEMENT") // NEW_PLACEMENT, REACTIVATION, TRANSFER_IN
+  status          String   @default("PENDING") // PENDING, UNDER_REVIEW, APPROVED, ACTIVATED, REJECTED, WITHDRAWN
+  placementDate   DateTime @default(now())
+  activationDate  DateTime?
+  exitDate        DateTime?
+  outstandingRequirements String?
+  decisionNotes   String?
+  decidedById     String?
+  decidedAt       DateTime?
+  createdById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pensioner       Pensioner @relation(fields: [pensionerId], references: [id])
+
+  @@index([pensionerId])
+  @@index([status])
+  @@index([category])
+  @@index([placementDate])
+  @@map("placement_records")
+}
+
+model GratuityEntitlement {
+  id                String   @id @default(cuid())
+  pensionerId       String   @unique
+  approvedAmount    Decimal  @db.Decimal(16, 2)
+  currency          String   @default("NGN")
+  approvedAt        DateTime?
+  approvedById      String?
+  benefitAssessmentId String?
+  notes             String?
+  status            String   @default("ACTIVE") // ACTIVE, CLOSED, DISPUTED
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  pensioner         Pensioner @relation(fields: [pensionerId], references: [id])
+  installments      GratuityInstallment[]
+
+  @@map("gratuity_entitlements")
+}
+
+model GratuityInstallment {
+  id                String   @id @default(cuid())
+  entitlementId     String
+  installmentNo     Int
+  proposedAmount    Decimal  @db.Decimal(16, 2)
+  paidAmount        Decimal? @db.Decimal(16, 2)
+  status            String   @default("PROPOSED") // PROPOSED, APPROVED, PAID, FAILED, CANCELLED
+  paymentScheduleId String?
+  transactionRef    String?
+  paidAt            DateTime?
+  notes             String?
+  createdById       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  entitlement       GratuityEntitlement @relation(fields: [entitlementId], references: [id], onDelete: Cascade)
+
+  @@index([entitlementId])
+  @@index([status])
+  @@map("gratuity_installments")
+}
+
+model NextOfKinClaim {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  pensionerId     String
+  claimantName    String
+  claimantPhone   String?
+  claimantEmail   String?
+  relationship    String
+  claimType       String   @default("GRATUITY") // GRATUITY, ARREARS, OTHER
+  amountClaimed   Decimal? @db.Decimal(16, 2)
+  status          String   @default("SUBMITTED") // SUBMITTED, UNDER_REVIEW, APPROVED, PAID, REJECTED
+  documentsNote   String?
+  decisionNotes   String?
+  decidedById     String?
+  decidedAt       DateTime?
+  paidAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  pensioner       Pensioner @relation(fields: [pensionerId], references: [id])
+
+  @@index([pensionerId])
+  @@index([status])
+  @@map("next_of_kin_claims")
+}
+
+model PhysicalFileDispatch {
+  id              String   @id @default(cuid())
+  reference       String   @unique
+  entityType      String   // PaymentSchedule, RetirementCase, Gratuity, Claim
+  entityId        String
+  receivingOffice String
+  dateSent        DateTime @default(now())
+  dateReturned    DateTime?
+  status          String   @default("SENT") // SENT, RECEIVED, RETURNED, CLOSED
+  physicalRef     String?
+  outcome         String?
+  evidencePath    String?
+  notes           String?
+  sentById        String?
+  updatedById     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([status])
+  @@map("physical_file_dispatches")
+}
+
+
+// ============================================================================
+// IMPORT BATCHES (Register retired/deceased bulk import)
+// ============================================================================
+
+model ImportBatch {
+  id              String   @id @default(cuid())
+  batchRef        String   @unique
+  module          String   @default("INTAKE") // INTAKE, PAYMENT_SCHEDULE, etc.
+  originalFilename String
+  templateVersion String?
+  status          String   @default("UPLOADED") // UPLOADED, VALIDATING, PREVIEW, PROCESSING, COMPLETED, FAILED
+  totalRows       Int      @default(0)
+  validRows       Int      @default(0)
+  invalidRows     Int      @default(0)
+  createdCount    Int      @default(0)
+  updatedCount    Int      @default(0)
+  skippedCount    Int      @default(0)
+  failedCount     Int      @default(0)
+  errorSummary    String?
+  uploadedById    String?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rows            ImportBatchRow[]
+
+  @@index([module, status])
+  @@index([createdAt])
+  @@map("import_batches")
+}
+
+model ImportBatchRow {
+  id              String   @id @default(cuid())
+  batchId         String
+  rowNumber       Int
+  status          String   // VALID, INVALID, DUPLICATE, CREATED, SKIPPED, FAILED
+  rawData         Json?
+  errorMessage    String?
+  pensionerNumber String?
+  createdRecordId String?
+  createdAt       DateTime @default(now())
+
+  batch           ImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([status])
+  @@map("import_batch_rows")
+}
+
+
+model BankDetailChange {
+  id                String   @id @default(cuid())
+  pensionerId       String
+  previousBankName  String?
+  previousAccountNumber String?
+  previousAccountName String?
+  newBankName       String?
+  newAccountNumber  String?
+  newAccountName    String?
+  status            String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  reason            String?
+  requestedById     String?
+  approvedById      String?
+  approvedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([pensionerId])
+  @@index([status])
+  @@map("bank_detail_changes")
+}
+
+model RecordActivity {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  eventType   String
+  summary     String?
+  actorId     String?
+  actorEmail  String?
+  beforeJson  Json?
+  afterJson   Json?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("record_activities")
+}
